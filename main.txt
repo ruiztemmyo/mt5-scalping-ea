@@ -14,7 +14,7 @@ input int EntryCooldownBars = 5;
 
 int emaFastHandle, emaMidHandle, emaSlowHandle;
 double point;
-int lastCheckedBar = -1;
+datetime lastCheckedTime = 0;
 
 int OnInit() {
   point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
@@ -27,9 +27,9 @@ int OnInit() {
 }
 
 void OnTick() {
-  int currentBar = iBarShift(_Symbol, PERIOD_M1, TimeCurrent(), true);
-  if (currentBar == lastCheckedBar || currentBar == -1) return;
-  lastCheckedBar = currentBar;
+  datetime currentTime = iTime(_Symbol, PERIOD_M1, 0);
+  if (currentTime == lastCheckedTime) return;
+  lastCheckedTime = currentTime;
 
   double emaFast[], emaMid[], emaSlow[];
   if (CopyBuffer(emaFastHandle, 0, 0, 3, emaFast) != 3) return;
@@ -55,23 +55,4 @@ void OnTick() {
 
   // --- Sell 条件 ----------------------------------------------------
   bool sellEmaOrder = emaFast[1] < emaMid[1] && emaMid[1] < emaSlow[1];
-  bool sellEmaSlope = emaFast[1] < emaFast[2] && emaMid[1] < emaMid[2] && emaSlow[1] < emaSlow[2];
-  bool sellPrevBelowFastEMA = close <= emaFast[1];
-
-  if (sellEmaOrder && sellEmaSlope && sellPrevBelowFastEMA && !PositionSelect(_Symbol)) {
-    double sl = NormalizeDouble(close + SLBufferPoints * point, _Digits);
-    trade.Sell(Lots, _Symbol, bid, sl, 0, NULL);
-  }
-
-  // --- 利確処理 -----------------------------------------------------
-  if (PositionSelect(_Symbol)) {
-    int type = (int)PositionGetInteger(POSITION_TYPE);
-    double price = (type == POSITION_TYPE_BUY) ? bid : ask;
-    double emaTouch = emaFast[0];
-
-    if ((type == POSITION_TYPE_BUY && price <= emaTouch) ||
-        (type == POSITION_TYPE_SELL && price >= emaTouch)) {
-      trade.PositionClose(_Symbol);
-    }
-  }
 }
