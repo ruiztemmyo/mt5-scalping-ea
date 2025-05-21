@@ -1,1 +1,1 @@
-# mk5-scalping-ea
+# mt5-scalping-ea
