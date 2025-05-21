@@ -1,0 +1,77 @@
+//+------------------------------------------------------------------+
+//|   トレンドフォロー型スキャル v5.5（傾き確認＆1足1エントリー制限） |
+//+------------------------------------------------------------------+
+#include <Trade\Trade.mqh>
+CTrade trade;
+
+// パラメータ設定
+input double Lots = 0.01;
+input int EMAPeriodFast = 20;
+input int EMAPeriodMid  = 50;
+input int EMAPeriodSlow = 75;
+input double SLBufferPoints = 100;
+input int EntryCooldownBars = 5;
+
+int emaFastHandle, emaMidHandle, emaSlowHandle;
+double point;
+int lastCheckedBar = -1;
+
+int OnInit() {
+  point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+  emaFastHandle = iMA(_Symbol, PERIOD_M1, EMAPeriodFast, 0, MODE_EMA, PRICE_CLOSE);
+  emaMidHandle  = iMA(_Symbol, PERIOD_M1, EMAPeriodMid, 0, MODE_EMA, PRICE_CLOSE);
+  emaSlowHandle = iMA(_Symbol, PERIOD_M1, EMAPeriodSlow, 0, MODE_EMA, PRICE_CLOSE);
+  if (emaFastHandle == INVALID_HANDLE || emaMidHandle == INVALID_HANDLE || emaSlowHandle == INVALID_HANDLE)
+    return INIT_FAILED;
+  return INIT_SUCCEEDED;
+}
+
+void OnTick() {
+  int currentBar = iBarShift(_Symbol, PERIOD_M1, TimeCurrent(), true);
+  if (currentBar == lastCheckedBar || currentBar == -1) return;
+  lastCheckedBar = currentBar;
+
+  double emaFast[], emaMid[], emaSlow[];
+  if (CopyBuffer(emaFastHandle, 0, 0, 3, emaFast) != 3) return;
+  if (CopyBuffer(emaMidHandle, 0, 0, 3, emaMid) != 3) return;
+  if (CopyBuffer(emaSlowHandle, 0, 0, 3, emaSlow) != 3) return;
+
+  double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+  double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+  double close = iClose(_Symbol, PERIOD_M1, 1);
+  double open  = iOpen(_Symbol, PERIOD_M1, 1);
+  double low   = iLow(_Symbol, PERIOD_M1, 1);
+  double high  = iHigh(_Symbol, PERIOD_M1, 1);
+
+  // --- Buy 条件 -----------------------------------------------------
+  bool buyEmaOrder = emaFast[1] > emaMid[1] && emaMid[1] > emaSlow[1];
+  bool buyEmaSlope = emaFast[1] > emaFast[2] && emaMid[1] > emaMid[2] && emaSlow[1] > emaSlow[2];
+  bool buyPrevAboveFastEMA = close >= emaFast[1];
+
+  if (buyEmaOrder && buyEmaSlope && buyPrevAboveFastEMA && !PositionSelect(_Symbol)) {
+    double sl = NormalizeDouble(open - SLBufferPoints * point, _Digits);
+    trade.Buy(Lots, _Symbol, ask, sl, 0, NULL);
+  }
+
+  // --- Sell 条件 ----------------------------------------------------
+  bool sellEmaOrder = emaFast[1] < emaMid[1] && emaMid[1] < emaSlow[1];
+  bool sellEmaSlope = emaFast[1] < emaFast[2] && emaMid[1] < emaMid[2] && emaSlow[1] < emaSlow[2];
+  bool sellPrevBelowFastEMA = close <= emaFast[1];
+
+  if (sellEmaOrder && sellEmaSlope && sellPrevBelowFastEMA && !PositionSelect(_Symbol)) {
+    double sl = NormalizeDouble(close + SLBufferPoints * point, _Digits);
+    trade.Sell(Lots, _Symbol, bid, sl, 0, NULL);
+  }
+
+  // --- 利確処理 -----------------------------------------------------
+  if (PositionSelect(_Symbol)) {
+    int type = (int)PositionGetInteger(POSITION_TYPE);
+    double price = (type == POSITION_TYPE_BUY) ? bid : ask;
+    double emaTouch = emaFast[0];
+
+    if ((type == POSITION_TYPE_BUY && price <= emaTouch) ||
+        (type == POSITION_TYPE_SELL && price >= emaTouch)) {
+      trade.PositionClose(_Symbol);
+    }
+  }
+}
